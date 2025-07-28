@@ -8,7 +8,7 @@ const {
   insertRetailersToMySQL,
   updateAssignedAgents,
   syncGroupRetailers,
-  updateSubArea1FromRetailerSubAreaTable
+  // updateSubArea1FromRetailerSubAreaTable
 } = proxyActivities({
   startToCloseTimeout: '10 minutes',
   heartbeatTimeout: '30 seconds',
@@ -32,7 +32,7 @@ async function saveRetailersFromFirebaseToMysqlWorkflow(retailerPath = 'Retailer
     log.info('Starting retailer sync process');
     await updateSyncStatus({
       table_name: "Retailer_Master",
-      status: "Running",
+      status: "Running/Temporal Sync",
       unique_key: syncStatusUniqueKey
     });
 
@@ -52,7 +52,7 @@ async function saveRetailersFromFirebaseToMysqlWorkflow(retailerPath = 'Retailer
     // Step 5: Update sync status to Completed
     await updateSyncStatus({
       table_name: "Retailer_Master",
-      status: "Completed",
+      status: "Completed/Temporal Sync",
       unique_key: syncStatusUniqueKey
     });
 
@@ -65,8 +65,8 @@ async function saveRetailersFromFirebaseToMysqlWorkflow(retailerPath = 'Retailer
     await syncGroupRetailers();
 
     // Step 8: Update sub area
-    log.info('Updating sub area');
-    await updateSubArea1FromRetailerSubAreaTable();
+    // log.info('Updating sub area');
+    // await updateSubArea1FromRetailerSubAreaTable();
 
     log.info('Retailer sync workflow completed successfully');
     return {
