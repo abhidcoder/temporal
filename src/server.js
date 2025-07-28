@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const { Connection, Client } = require('@temporalio/client');
 const { orderFulfillmentWorkflow, dataProcessingWorkflow } = require('./workflows');
+
+const {saveRetailersFromFirebaseToMysqlWorkflow} = require('./retailerMaster/workflow');
 // Simple ID generator to avoid ESM issues
 function generateId() {
   return Math.random().toString(36).substr(2, 9);
@@ -35,6 +37,71 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString() 
   });
 });
+
+
+
+// Retailer sync endpoint - CORRECTED VERSION
+app.post('/retailers/sync', async (req, res) => {
+  try {
+    // Validate Temporal client is available
+    if (!temporalClient) {
+      return res.status(503).json({
+        success: false,
+        error: 'Temporal client not initialized',
+        message: 'Server is not ready to process workflows'
+      });
+    }
+
+    // Extract parameters from request body or use defaults
+    const { retailerPath = 'Retailer_Master', workflowTimeout = '30 minutes' } = req.body;
+    
+    // Generate unique workflow ID
+    const workflowId = `retailer-sync-${Date.now()}-${generateId()}`;
+    
+    console.log(`🚀 Starting retailer sync workflow: ${workflowId}`);
+
+    // Start the workflow using Temporal client
+    const handle = await temporalClient.workflow.start(saveRetailersFromFirebaseToMysqlWorkflow, {
+      args: [retailerPath], // Pass retailerPath as argument
+      taskQueue: 'retailer-sync-queue',
+      workflowId: workflowId,
+      workflowExecutionTimeout: workflowTimeout,
+      retry: {
+        initialInterval: '1s',
+        maximumInterval: '30s',
+        maximumAttempts: 3,
+      }
+    });
+
+    console.log(`✅ Workflow started successfully: ${workflowId}`);
+
+    // Return immediate response with workflow handle
+    res.status(202).json({
+      success: true,
+      message: 'Retailer sync workflow started successfully',
+      workflowId: handle.workflowId,
+      runId: handle.firstExecutionRunId,
+      status: 'RUNNING',
+      startTime: new Date().toISOString(),
+      // Include workflow URL for monitoring (if you have Temporal Web UI)
+      workflowUrl: `http://localhost:8233/namespaces/default/workflows/${handle.workflowId}/${handle.firstExecutionRunId}`
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to start retailer sync workflow:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start retailer sync workflow',
+      message: error.message,
+      details: error.stack,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+
+
 
 // Start order fulfillment workflow
 app.post('/orders', async (req, res) => {
