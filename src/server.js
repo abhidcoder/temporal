@@ -1,12 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const { Connection, Client } = require('@temporalio/client');
+const { retailerSync } = require('./sync_functions');
 
 const {saveRetailersFromFirebaseToMysqlWorkflow} = require('./Workflow/workflows');
 
-function generateId() {
-  return Math.random().toString(36).substr(2, 9);
-}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -41,32 +39,22 @@ app.get('/', (req, res) => {
 
 // Retailer sync endpoint - CORRECTED VERSION
 app.post('/table/sync', async (req, res) => {
+
+  let { tableKey } = req.body;
+
+  if (!tableKey) {
+    return res.status(400).json({"error": "tableKey is required"});
+  }
+
   try {
-    async function testRetailerSync() {
-      const connection = await Connection.connect();
-      const client = new Client({ connection });
 
-      try {
-        console.log('🚀 Starting Retailer Sync Workflow...');
-
-        const handle = await client.workflow.start('saveRetailersFromFirebaseToMysqlWorkflow', {
-          taskQueue: 'superzop-sync-queue',
-          workflowId: `retailer-sync-${Date.now()}`,
-          args: ['Retailer_Master'],
-        });
-
-        console.log('✅ Workflow started with ID:', handle.workflowId);
-        return handle;
-
-      } catch (error) {
-        console.error('❌ Workflow failed to start:', error);
-        throw error;
-      } finally {
-        await connection.close();
-      }
+    let handle
+    if(tableKey == "retailer_master") {
+      handle = await retailerSync();
     }
-
-    const handle = await testRetailerSync();
+    else if(tableKey == "orders") {
+      
+    }
 
     res.status(202).json({
       success: true,
