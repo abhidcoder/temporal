@@ -11,10 +11,9 @@ const {
   syncGroupRetailers,
   
   // Orders activities - Add these new ones
-  updateOrdersSyncStatus,
   ordersYesterdayTransferActivity,
   insertOrdersToMySQL,
-  completeOrdersSyncStatus,
+  completeSyncStatus,
   
   // updateSubArea1FromRetailerSubAreaTable
 } = proxyActivities({
@@ -112,7 +111,7 @@ async function ordersYesterdayTransferWorkflow(ordersYestQuery = 'OrdersYest') {
   try {
     // Step 1: Update sync status to Running
     log.info('Starting orders yesterday transfer process');
-    await updateOrdersSyncStatus({
+    await updateSyncStatus({
       table_name: "Orders_New_To_Orders",
       status: "Running/Temporal Sync",
       unique_key: syncStatusUniqueKey
@@ -138,7 +137,7 @@ async function ordersYesterdayTransferWorkflow(ordersYestQuery = 'OrdersYest') {
 
     // Step 4: Complete sync status
     log.info('Completing sync status');
-    await completeOrdersSyncStatus(orderResult.syncStatusUniqueKey);
+    await completeSyncStatus(orderResult.syncStatusUniqueKey);
 
     log.info('Orders yesterday transfer workflow completed successfully');
     return {
@@ -155,7 +154,7 @@ async function ordersYesterdayTransferWorkflow(ordersYestQuery = 'OrdersYest') {
   } catch (error) {
     // Update sync status to Failed
     try {
-      await updateOrdersSyncStatus({
+      await updateSyncStatus({
         table_name: "Orders_New_To_Orders",
         status: "Failed/Temporal Sync",
         unique_key: syncStatusUniqueKey,

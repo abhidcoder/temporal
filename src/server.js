@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Connection, Client } = require('@temporalio/client');
-const { retailerSync } = require('./sync_functions');
+const { retailerSync, ordersSync } = require('./sync_functions');
 
 const {saveRetailersFromFirebaseToMysqlWorkflow} = require('./Workflow/workflows');
 
@@ -37,7 +37,7 @@ app.get('/', (req, res) => {
 
 
 
-// Retailer sync endpoint - CORRECTED VERSION
+// Table sync endpoint - handles both retailer and orders workflows
 app.post('/table/sync', async (req, res) => {
 
   let { tableKey } = req.body;
@@ -48,17 +48,26 @@ app.post('/table/sync', async (req, res) => {
 
   try {
 
-    let handle
+    let handle;
+    let workflowType;
+    
     if(tableKey == "retailer_master") {
       handle = await retailerSync();
+      workflowType = 'retailer';
     }
     else if(tableKey == "orders") {
-      
+      handle = await ordersSync();
+      workflowType = 'orders';
+    }
+    else {
+      return res.status(400).json({
+        "error": "Invalid tableKey. Supported values: 'retailer_master', 'orders'"
+      });
     }
 
     res.status(202).json({
       success: true,
-      message: 'Retailer sync workflow started successfully',
+      message: `${workflowType} sync workflow started successfully`,
       workflowId: handle.workflowId,
       runId: handle.firstExecutionRunId,
       status: 'RUNNING',
@@ -67,11 +76,11 @@ app.post('/table/sync', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Failed to start retailer sync workflow:', error);
+    console.error('❌ Failed to start workflow:', error);
 
     res.status(500).json({
       success: false,
-      error: 'Failed to start retailer sync workflow',
+      error: 'Failed to start workflow',
       message: error.message,
       details: error.stack,
       timestamp: new Date().toISOString()

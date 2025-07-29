@@ -1,7 +1,7 @@
 const { Client } = require('@temporalio/client');
 const { Connection } = require('@temporalio/client'); // adjust this if needed
 
-
+const {saveRetailersFromFirebaseToMysqlWorkflow, ordersYesterdayTransferWorkflow} = require('./Workflow/workflows');
 
 async function retailerSync() {
   const connection = await Connection.connect();
@@ -27,4 +27,28 @@ async function retailerSync() {
   }
 }
 
-module.exports = { retailerSync };
+async function ordersSync() {
+  const connection = await Connection.connect();
+  const client = new Client({ connection });
+
+  try {
+    console.log('🚀 Starting Orders Transfer Workflow...');
+
+    const handle = await client.workflow.start('ordersYesterdayTransferWorkflow', {
+      taskQueue: 'superzop-sync-queue',
+      workflowId: `orders-transfer-${Date.now()}`,
+      args: ['OrdersYest'],
+    });
+
+    console.log('✅ Workflow started with ID:', handle.workflowId);
+    return handle;
+
+  } catch (error) {
+    console.error('❌ Workflow failed to start:', error);
+    throw error;
+  } finally {
+    await connection.close();
+  }
+}
+
+module.exports = { retailerSync, ordersSync };
