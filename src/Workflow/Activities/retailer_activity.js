@@ -1,6 +1,6 @@
 // src/activities.js
-const { ref, get, child, database } = require('../database/firebase-config.js');
-const { promisePool } = require('../database/mysql-connection.js');
+const { ref, get, child, database } = require('../../database/firebase-config.js');
+const { promisePool } = require('../../database/mysql-connection.js');
 const { ApplicationFailure } = require('@temporalio/activity');
 const request = require('request');
 require('dotenv').config();

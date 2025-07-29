@@ -1,11 +1,11 @@
 // src/worker.js
 const { Worker } = require('@temporalio/worker');
-const activities = require('./activity');
+const activities = require('./Activities/retailer_activity');
 
 async function run() {
   try {
     const worker = await Worker.create({
-      workflowsPath: require.resolve('./workflow'),
+      workflowsPath: require.resolve('./workflows'),
       activities,
       taskQueue: 'retailer-sync-queue',
     });
