@@ -42,39 +42,32 @@ app.get('/', (req, res) => {
 // Retailer sync endpoint - CORRECTED VERSION
 app.post('/table/sync', async (req, res) => {
   try {
-    // Validate Temporal client is available
-    if (!temporalClient) {
-      return res.status(503).json({
-        success: false,
-        error: 'Temporal client not initialized',
-        message: 'Server is not ready to process workflows'
-      });
+    async function testRetailerSync() {
+      const connection = await Connection.connect();
+      const client = new Client({ connection });
+
+      try {
+        console.log('🚀 Starting Retailer Sync Workflow...');
+
+        const handle = await client.workflow.start('saveRetailersFromFirebaseToMysqlWorkflow', {
+          taskQueue: 'superzop-sync-queue',
+          workflowId: `retailer-sync-${Date.now()}`,
+          args: ['Retailer_Master'],
+        });
+
+        console.log('✅ Workflow started with ID:', handle.workflowId);
+        return handle;
+
+      } catch (error) {
+        console.error('❌ Workflow failed to start:', error);
+        throw error;
+      } finally {
+        await connection.close();
+      }
     }
 
-    // Extract parameters from request body or use defaults
-    const { retailerPath = 'Retailer_Master', workflowTimeout = '30 minutes' } = req.body;
-    
-    // Generate unique workflow ID
-    const workflowId = `retailer-sync-${Date.now()}-${generateId()}`;
-    
-    console.log(`🚀 Starting retailer sync workflow: ${workflowId}`);
+    const handle = await testRetailerSync();
 
-    // Start the workflow using Temporal client
-    const handle = await temporalClient.workflow.start(saveRetailersFromFirebaseToMysqlWorkflow, {
-      args: [retailerPath], // Pass retailerPath as argument
-      taskQueue: 'retailer-sync-queue',
-      workflowId: workflowId,
-      workflowExecutionTimeout: workflowTimeout,
-      retry: {
-        initialInterval: '1s',
-        maximumInterval: '30s',
-        maximumAttempts: 3,
-      }
-    });
-
-    console.log(`✅ Workflow started successfully: ${workflowId}`);
-
-    // Return immediate response with workflow handle
     res.status(202).json({
       success: true,
       message: 'Retailer sync workflow started successfully',
@@ -82,13 +75,12 @@ app.post('/table/sync', async (req, res) => {
       runId: handle.firstExecutionRunId,
       status: 'RUNNING',
       startTime: new Date().toISOString(),
-      // Include workflow URL for monitoring (if you have Temporal Web UI)
       workflowUrl: `http://localhost:8233/namespaces/default/workflows/${handle.workflowId}/${handle.firstExecutionRunId}`
     });
 
   } catch (error) {
     console.error('❌ Failed to start retailer sync workflow:', error);
-    
+
     res.status(500).json({
       success: false,
       error: 'Failed to start retailer sync workflow',

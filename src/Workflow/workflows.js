@@ -2,12 +2,20 @@ const { proxyActivities, log } = require('@temporalio/workflow');
 
 // Proxy activities with appropriate timeouts
 const {
+  // Retailer activities
   updateSyncStatus,
   fetchRetailersFromFirebase,
   processRetailerData,
   insertRetailersToMySQL,
   updateAssignedAgents,
   syncGroupRetailers,
+  
+  // Orders activities - Add these new ones
+  updateOrdersSyncStatus,
+  ordersYesterdayTransferActivity,
+  insertOrdersToMySQL,
+  completeOrdersSyncStatus,
+  
   // updateSubArea1FromRetailerSubAreaTable
 } = proxyActivities({
   startToCloseTimeout: '10 minutes',
@@ -19,7 +27,7 @@ const {
   },
 });
 
-
+// Existing retailer workflow - unchanged
 async function saveRetailersFromFirebaseToMysqlWorkflow(retailerPath = 'Retailer_Master') {
   const dateNow = new Date();
   const [monthNow, dayNow, yearNow] = [dateNow.getMonth() + 1, dateNow.getDate(), dateNow.getFullYear()];
@@ -93,4 +101,76 @@ async function saveRetailersFromFirebaseToMysqlWorkflow(retailerPath = 'Retailer
   }
 }
 
-module.exports = { saveRetailersFromFirebaseToMysqlWorkflow };
+// New orders workflow - using the same pattern as your retailer workflow
+async function ordersYesterdayTransferWorkflow(ordersYestQuery = 'OrdersYest') {
+  const dateNow = new Date();
+  const [monthNow, dayNow, yearNow] = [dateNow.getMonth() + 1, dateNow.getDate(), dateNow.getFullYear()];
+  const [hourNow, minutesNow, secondsNow] = [dateNow.getHours(), dateNow.getMinutes(), dateNow.getSeconds()];
+  const completeDateNow = `${yearNow}-${monthNow}-${dayNow}_${hourNow}:${minutesNow}:${secondsNow}`;
+  const syncStatusUniqueKey = `Orders_New_To_Orders_${completeDateNow}`;
+
+  try {
+    // Step 1: Update sync status to Running
+    log.info('Starting orders yesterday transfer process');
+    await updateOrdersSyncStatus({
+      table_name: "Orders_New_To_Orders",
+      status: "Running/Temporal Sync",
+      unique_key: syncStatusUniqueKey
+    });
+
+    // Step 2: Process yesterday's orders from Firebase
+    log.info('Processing yesterday\'s orders from Firebase');
+    const orderResult = await ordersYesterdayTransferActivity({
+      ordersYestQuery: ordersYestQuery
+    });
+
+    log.info(`Successfully processed ${orderResult.processedOrdersCount} orders`);
+    log.info(`Valid orders: ${orderResult.validOrdersCount}, Cancelled: ${orderResult.cancelledOrdersCount}`);
+
+    // Step 3: Insert orders to MySQL (if there are orders to process)
+    if (orderResult.orders && orderResult.orders.length > 0) {
+      log.info('Inserting orders to MySQL');
+      const mysqlResult = await insertOrdersToMySQL(orderResult.orders);
+      log.info(`Successfully inserted ${mysqlResult.totalProcessed}/${mysqlResult.totalOrders} orders in ${mysqlResult.chunksProcessed} chunks`);
+    } else {
+      log.info('No orders to insert to MySQL');
+    }
+
+    // Step 4: Complete sync status
+    log.info('Completing sync status');
+    await completeOrdersSyncStatus(orderResult.syncStatusUniqueKey);
+
+    log.info('Orders yesterday transfer workflow completed successfully');
+    return {
+      success: true,
+      totalOrders: orderResult.processedOrdersCount,
+      validOrders: orderResult.validOrdersCount,
+      cancelledOrders: orderResult.cancelledOrdersCount,
+      totalValue: orderResult.totalOrdersValue,
+      cancelledValue: orderResult.totalCancelledValue,
+      syncStatusKey: orderResult.syncStatusUniqueKey,
+      dateProcessed: orderResult.dateProcessed
+    };
+
+  } catch (error) {
+    // Update sync status to Failed
+    try {
+      await updateOrdersSyncStatus({
+        table_name: "Orders_New_To_Orders",
+        status: "Failed/Temporal Sync",
+        unique_key: syncStatusUniqueKey,
+        error_message: error.message
+      });
+    } catch (statusError) {
+      log.error('Failed to update sync status on error', { statusError });
+    }
+
+    log.error('Orders yesterday transfer workflow failed', { error });
+    throw error;
+  }
+}
+
+module.exports = { 
+  saveRetailersFromFirebaseToMysqlWorkflow,
+  ordersYesterdayTransferWorkflow 
+};
