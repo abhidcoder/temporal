@@ -17,14 +17,14 @@ async function test() {
     console.log('About to INSERT...');
     await promisePool.execute(
       `INSERT INTO Sync_Status (table_name, status, unique_key) VALUES (?, ?, ?)`,
-      ['Retailer_Products', 'Test', 'test_key']
+      ['Retailer_Products', 'Test', 'retailer-products-sync-1753875909252']
     );
     console.log('INSERT done.');
 
     console.log('About to SELECT...');
     const [rows] = await promisePool.execute(
       `SELECT * FROM Sync_Status WHERE unique_key = ?`,
-      ['test_key']
+      ['retailer-products-sync-1753875909252']
     );
     console.log('SELECT done.', rows);
   } catch (err) {

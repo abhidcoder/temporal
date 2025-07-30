@@ -1,7 +1,12 @@
+
 const { Client } = require('@temporalio/client');
 const { Connection } = require('@temporalio/client'); // adjust this if needed
 
-const {saveRetailersFromFirebaseToMysqlWorkflow, ordersYesterdayTransferWorkflow} = require('./Workflow/workflows');
+
+const {saveRetailersFromFirebaseToMysqlWorkflow, ordersYesterdayTransferWorkflow, retailerProductsSyncWorkflow} = require('./Workflow/workflows');
+
+// Import the activity to get workflow state
+const { getWorkflowStateFromSyncStatus } = require('./Workflow/Activities/retailer_products_activity');
 
 async function retailerSync() {
   const connection = await Connection.connect();
@@ -51,4 +56,104 @@ async function ordersSync() {
   }
 }
 
-module.exports = { retailerSync, ordersSync };
+async function retailerProductsSync() {
+  const connection = await Connection.connect();
+  const client = new Client({ connection });
+
+  try {
+    console.log('🚀 Starting Retailer Products Sync Workflow...');
+
+    // Generate workflowId once
+    const workflowId = `retailer-products-sync-${Date.now()}`;
+
+    const handle = await client.workflow.start('retailerProductsSyncWorkflow', {
+      taskQueue: 'superzop-sync-queue',
+      workflowId, // use this workflowId for Temporal
+      args: [workflowId, 'Retailer_Products', null], // pass workflowId as first arg
+    });
+
+    console.log('✅ Workflow started with ID:', handle.workflowId);
+    return handle;
+
+  } catch (error) {
+    console.error('❌ Workflow failed to start:', error);
+    throw error;
+  } finally {
+    await connection.close();
+  }
+}
+
+async function resumeRetailerProductsSync(workflowId, checkpoint = null) {
+  const connection = await Connection.connect();
+  const client = new Client({ connection });
+
+  try {
+    console.log(`🔄 Resuming Retailer Products Sync Workflow from checkpoint: ${checkpoint}`);
+
+    if (!workflowId) {
+      throw new Error('Workflow ID is required for resume operation');
+    }
+
+    // First, get the original workflow's state from sync status
+    let workflowState = null;
+    try {
+      console.log(`🔍 Attempting to retrieve workflow state for ID: ${workflowId}`);
+      
+      // Get the workflow state from the sync status table
+      const stateResponse = await getWorkflowStateFromSyncStatus(workflowId);
+      
+      console.log(`🔍 State response received:`, {
+        statusCode: stateResponse.statusCode,
+        hasBody: !!stateResponse.body,
+        hasWorkflowState: stateResponse.body && !!stateResponse.body.workflow_state
+      });
+      
+      if (stateResponse.statusCode === 200 && stateResponse.body && stateResponse.body.workflow_state) {
+        try {
+          workflowState = JSON.parse(stateResponse.body.workflow_state);
+          console.log('✅ Retrieved workflow state from sync status:', workflowState);
+        } catch (parseError) {
+          console.error('❌ Failed to parse workflow state JSON:', parseError.message);
+          throw new Error(`Invalid workflow state format: ${parseError.message}`);
+        }
+      } else if (stateResponse.statusCode === 404) {
+        console.warn('No workflow state found in sync status, cannot resume');
+        throw new Error('No workflow state found in sync status table');
+      } else {
+        console.warn('Invalid response from sync status table:', stateResponse);
+        throw new Error('Invalid response from sync status table');
+      }
+    } catch (stateError) {
+      console.error('Could not retrieve original workflow state:', stateError.message);
+      throw new Error(`Cannot resume workflow: ${stateError.message}`);
+    }
+
+    // Start a new workflow with resume parameters
+    const newWorkflowId = `retailer-products-sync-resume-${Date.now()}`;
+    
+    const handle = await client.workflow.start('retailerProductsSyncWorkflow', {
+      taskQueue: 'superzop-sync-queue',
+      workflowId: newWorkflowId,
+      args: [
+        'Retailer_Products',
+        {
+          isResume: true,
+          originalWorkflowId: workflowId,
+          checkpoint: checkpoint,
+          workflowState: workflowState
+        }
+      ]
+    });
+
+    console.log(`✅ Resume workflow started with ID: ${newWorkflowId}`);
+    return handle;
+
+  } catch (error) {
+    console.error('❌ Failed to start resume workflow:', error);
+    throw error;
+  } finally {
+    await connection.close();
+  }
+}
+
+module.exports = { retailerSync, ordersSync, retailerProductsSync, resumeRetailerProductsSync };

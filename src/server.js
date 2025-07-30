@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Connection, Client } = require('@temporalio/client');
-const { retailerSync, ordersSync } = require('./sync_functions');
+const { retailerSync, ordersSync, retailerProductsSync, resumeRetailerProductsSync } = require('./sync_functions');
 
 const {saveRetailersFromFirebaseToMysqlWorkflow} = require('./Workflow/workflows');
 
@@ -59,9 +59,13 @@ app.post('/table/sync', async (req, res) => {
       handle = await ordersSync();
       workflowType = 'orders';
     }
+    else if(tableKey == "retailer_products") {
+      handle = await retailerProductsSync();
+      workflowType = 'retailer_products';
+    }
     else {
       return res.status(400).json({
-        "error": "Invalid tableKey. Supported values: 'retailer_master', 'orders'"
+        "error": "Invalid tableKey. Supported values: 'retailer_master', 'orders', 'retailer_products'"
       });
     }
 
@@ -81,6 +85,52 @@ app.post('/table/sync', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to start workflow',
+      message: error.message,
+      details: error.stack,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Resume workflow endpoint
+app.post('/table/resume', async (req, res) => {
+  let { workflowId, tableKey, checkpoint } = req.body;
+
+  if (!workflowId || !tableKey) {
+    return res.status(400).json({"error": "workflowId and tableKey are required"});
+  }
+
+  try {
+    let handle;
+    let workflowType;
+    
+    if(tableKey == "retailer_products") {
+      handle = await resumeRetailerProductsSync(workflowId, checkpoint);
+      workflowType = 'retailer_products';
+    }
+    else {
+      return res.status(400).json({
+        "error": "Resume not supported for this tableKey. Supported values: 'retailer_products'"
+      });
+    }
+
+    res.status(202).json({
+      success: true,
+      message: `${workflowType} workflow resume initiated`,
+      workflowId: handle.workflowId,
+      originalWorkflowId: workflowId,
+      checkpoint: checkpoint,
+      status: 'RESUMING',
+      resumeTime: new Date().toISOString(),
+      workflowUrl: `http://localhost:8233/namespaces/default/workflows/${handle.workflowId}`
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to resume workflow:', error);
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resume workflow',
       message: error.message,
       details: error.stack,
       timestamp: new Date().toISOString()

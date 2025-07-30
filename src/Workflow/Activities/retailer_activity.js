@@ -1,9 +1,10 @@
 // src/activities.js
+require('dotenv').config();
 const { ref, get, child, database } = require('../../database/firebase-config.js');
 const { promisePool } = require('../../database/mysql-connection.js');
 const { ApplicationFailure } = require('@temporalio/activity');
 const request = require('request');
-require('dotenv').config();
+
 
 const BASE_URL = process.env.BASE_URL || 'https://dev-services.superzop.com';
 

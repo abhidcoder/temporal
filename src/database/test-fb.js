@@ -2,7 +2,7 @@
 const { database, ref, get } = require('./firebase-config');
 
 // Change this to a path that exists in your Firebase DB
-const testPath = '/Retailer_Master'; // root, or e.g. '/some/test/path'
+const testPath = '/Retailer_Products'; // root, or e.g. '/some/test/path'
 
 async function testFirebase() {
   try {

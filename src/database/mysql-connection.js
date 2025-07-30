@@ -14,6 +14,14 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
+// Log connection configuration (without sensitive data)
+console.log('🔍 Database connection config:', {
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  database: process.env.DB_NAME,
+  hasPassword: !!process.env.DB_PASSWORD
+});
+
 const promisePool = pool.promise();
 
 pool.getConnection((err, connection) => {
