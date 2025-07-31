@@ -23,6 +23,13 @@ const {
   insertOrdersNewToMySQL,
   updateFinalSyncStatus,
   
+  // Salesman Details activities
+  saveSalesmanDetailsToMysql,
+  deleteExistingSalesmanDetails,
+  fetchSalesmanDetailsFromFirebase,
+  processSalesmanDetailsData,
+  insertSalesmanDetailsToMySQL,
+  
   // Retailer Products activities
   updateRetailerProductsSyncStatus,
   fetchRetailerProductsFromFirebase,
@@ -570,9 +577,180 @@ async function ordersNewSyncWorkflow(ordersPath = 'Orders_News') {
   }
 }
 
+// Salesman Details Sync Workflow - using granular steps for better monitoring
+async function salesmanDetailsSyncWorkflow(salesmanPath = 'Salesman_Details') {
+  const dateNow = new Date();
+  const [monthNow, dayNow, yearNow] = [dateNow.getMonth() + 1, dateNow.getDate(), dateNow.getFullYear()];
+  const [hourNow, minutesNow, secondsNow] = [dateNow.getHours(), dateNow.getMinutes(), dateNow.getSeconds()];
+  const completeDateNow = `${yearNow}-${monthNow}-${dayNow}_${hourNow}:${minutesNow}:${secondsNow}`;
+  const syncStatusUniqueKey = `Salesman_Details_${completeDateNow}`;
+
+  let salesmanDetails = [];
+  let processedSalesmanDetails = [];
+  let deleteResult = null;
+  let insertResult = null;
+
+  try {
+    log.info('🚀 Starting Salesman Details Sync Workflow');
+    log.info(`📅 Sync Status Key: ${syncStatusUniqueKey}`);
+    log.info(`📂 Firebase Path: ${salesmanPath}`);
+
+    // Step 1: Initialize sync status
+    log.info('📊 Step 1: Initializing sync status...');
+    const syncStatusObj = {
+      table_name: "Salesman_Details",
+      status: "Initializing/Temporal Sync",
+      unique_key: syncStatusUniqueKey
+    };
+    await updateSyncStatus(syncStatusObj);
+    log.info('✅ Step 1 completed: Sync status initialized');
+
+    // Step 2: Update sync status to Running
+    log.info('🔄 Step 2: Updating sync status to Running...');
+    const runningStatusObj = {
+      table_name: "Salesman_Details",
+      status: "Running/Temporal Sync",
+      unique_key: syncStatusUniqueKey
+    };
+    await updateSyncStatus(runningStatusObj);
+    log.info('✅ Step 2 completed: Sync status set to Running');
+
+    // Step 3: Validate Firebase path
+    log.info('🔍 Step 3: Validating Firebase path...');
+    if (!salesmanPath || typeof salesmanPath !== 'string') {
+      throw new Error(`Invalid Firebase path: ${salesmanPath}`);
+    }
+    log.info(`✅ Step 3 completed: Firebase path validated - ${salesmanPath}`);
+
+    // Step 4: Delete existing salesman details from database
+    log.info('🗑️ Step 4: Deleting existing salesman details from database...');
+    deleteResult = await deleteExistingSalesmanDetails();
+    log.info(`✅ Step 4 completed: Successfully deleted ${deleteResult.affectedRows} existing salesman details`);
+
+    // Step 5: Fetch salesman details from Firebase
+    log.info('🔥 Step 5: Fetching salesman details from Firebase...');
+    salesmanDetails = await fetchSalesmanDetailsFromFirebase(salesmanPath);
+    log.info(`✅ Step 5 completed: Fetched ${salesmanDetails.length} salesman details from Firebase`);
+
+    // Step 6: Validate fetched data
+    log.info('✅ Step 6: Validating fetched data...');
+    if (!Array.isArray(salesmanDetails)) {
+      throw new Error('Fetched salesman details is not an array');
+    }
+    log.info(`✅ Step 6 completed: Data validation passed - ${salesmanDetails.length} salesman details`);
+
+    // Step 7: Process salesman details data
+    log.info('⚙️ Step 7: Processing salesman details data...');
+    processedSalesmanDetails = await processSalesmanDetailsData(salesmanDetails);
+    log.info(`✅ Step 7 completed: Processed ${processedSalesmanDetails.length} salesman details`);
+
+    // Step 8: Validate processed data
+    log.info('✅ Step 8: Validating processed data...');
+    if (!Array.isArray(processedSalesmanDetails)) {
+      throw new Error('Processed salesman details is not an array');
+    }
+    if (processedSalesmanDetails.length !== salesmanDetails.length) {
+      log.warn(`⚠️ Warning: Processed salesman details count (${processedSalesmanDetails.length}) differs from fetched count (${salesmanDetails.length})`);
+    }
+    log.info(`✅ Step 8 completed: Processed data validation passed`);
+
+    // Step 9: Prepare for database insertion
+    log.info('📋 Step 9: Preparing for database insertion...');
+    if (processedSalesmanDetails.length === 0) {
+      log.info('ℹ️ No salesman details to insert, skipping database operations');
+    } else {
+      log.info(`📊 Preparing to insert ${processedSalesmanDetails.length} salesman details`);
+    }
+    log.info('✅ Step 9 completed: Database insertion prepared');
+
+    // Step 10: Insert salesman details to MySQL
+    log.info('💾 Step 10: Inserting salesman details to MySQL...');
+    if (processedSalesmanDetails.length > 0) {
+      insertResult = await insertSalesmanDetailsToMySQL(processedSalesmanDetails, syncStatusUniqueKey);
+      log.info(`✅ Step 10 completed: Successfully processed ${insertResult.totalProcessed} salesman details in ${insertResult.chunksProcessed} chunks`);
+    } else {
+      insertResult = { totalProcessed: 0, chunksProcessed: 0 };
+      log.info('✅ Step 10 completed: No salesman details to insert');
+    }
+
+    // Step 11: Validate insertion results
+    log.info('✅ Step 11: Validating insertion results...');
+    if (processedSalesmanDetails.length > 0 && (!insertResult || insertResult.totalProcessed !== processedSalesmanDetails.length)) {
+      log.warn(`⚠️ Warning: Insertion count (${insertResult?.totalProcessed || 0}) differs from processed count (${processedSalesmanDetails.length})`);
+    }
+    log.info('✅ Step 11 completed: Insertion results validated');
+
+    // Step 12: Update final sync status to Completed
+    log.info('🏁 Step 12: Updating final sync status to Completed...');
+    await updateFinalSyncStatus(syncStatusUniqueKey, "Completed/Temporal Sync");
+    log.info('✅ Step 12 completed: Final sync status updated');
+
+    // Step 13: Generate final report
+    log.info('📊 Step 13: Generating final report...');
+    const finalReport = {
+      success: true,
+      totalSalesmanDetails: processedSalesmanDetails.length,
+      deletedSalesmanDetails: deleteResult.affectedRows,
+      insertedSalesmanDetails: insertResult.totalProcessed,
+      chunksProcessed: insertResult.chunksProcessed,
+      syncStatusKey: syncStatusUniqueKey,
+      statusMessage: "Salesman Details sync completed successfully",
+      timestamp: new Date().toISOString(),
+      workflowDuration: Date.now() - dateNow.getTime()
+    };
+    log.info('✅ Step 13 completed: Final report generated');
+
+    log.info('🎉 Salesman details sync workflow completed successfully!');
+    log.info(`📈 Summary: ${finalReport.totalSalesmanDetails} salesman details processed, ${finalReport.insertedSalesmanDetails} inserted`);
+    
+    return finalReport;
+
+  } catch (error) {
+    log.error('❌ Salesman details sync workflow failed', { error });
+    
+    // Update sync status to Failed with detailed error information
+    try {
+      log.info('🔄 Updating sync status to Failed...');
+      const failedStatusObj = {
+        table_name: "Salesman_Details",
+        status: "Failed/Temporal Sync",
+        unique_key: syncStatusUniqueKey,
+        error_message: error.message,
+        error_details: {
+          salesmanDetailsFetched: salesmanDetails.length,
+          salesmanDetailsProcessed: processedSalesmanDetails.length,
+          salesmanDetailsDeleted: deleteResult?.affectedRows || 0,
+          salesmanDetailsInserted: insertResult?.totalProcessed || 0,
+          timestamp: new Date().toISOString()
+        }
+      };
+      await updateFinalSyncStatus(syncStatusUniqueKey, "Failed/Temporal Sync");
+      log.info('✅ Sync status updated to Failed');
+    } catch (statusError) {
+      log.error('❌ Failed to update sync status on error', { statusError });
+    }
+
+    // Throw detailed error for workflow failure
+    const detailedError = {
+      message: `Salesman details sync failed: ${error.message}`,
+      details: {
+        step: 'Unknown',
+        salesmanDetailsFetched: salesmanDetails.length,
+        salesmanDetailsProcessed: processedSalesmanDetails.length,
+        salesmanDetailsDeleted: deleteResult?.affectedRows || 0,
+        salesmanDetailsInserted: insertResult?.totalProcessed || 0,
+        originalError: error.message
+      }
+    };
+
+    throw new Error(JSON.stringify(detailedError));
+  }
+}
+
 module.exports = { 
   saveRetailersFromFirebaseToMysqlWorkflow,
   ordersYesterdayTransferWorkflow,
   retailerProductsSyncWorkflow,
-  ordersNewSyncWorkflow
+  ordersNewSyncWorkflow,
+  salesmanDetailsSyncWorkflow
 };
