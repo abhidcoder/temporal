@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Connection, Client } = require('@temporalio/client');
-const { retailerSync, ordersSync, retailerProductsSync, resumeRetailerProductsSync } = require('./sync_functions');
+const { retailerSync, ordersSync, ordersNewSync, retailerProductsSync, resumeRetailerProductsSync } = require('./sync_functions');
 
 const {saveRetailersFromFirebaseToMysqlWorkflow} = require('./Workflow/workflows');
 
@@ -59,13 +59,17 @@ app.post('/table/sync', async (req, res) => {
       handle = await ordersSync();
       workflowType = 'orders';
     }
+    else if(tableKey == "orders_new") {
+      handle = await ordersNewSync();
+      workflowType = 'orders_new';
+    }
     else if(tableKey == "retailer_products") {
       handle = await retailerProductsSync();
       workflowType = 'retailer_products';
     }
     else {
       return res.status(400).json({
-        "error": "Invalid tableKey. Supported values: 'retailer_master', 'orders', 'retailer_products'"
+        "error": "Invalid tableKey. Supported values: 'retailer_master', 'orders', 'orders_new', 'retailer_products'"
       });
     }
 

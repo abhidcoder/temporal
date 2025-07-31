@@ -3,7 +3,7 @@ const { Client } = require('@temporalio/client');
 const { Connection } = require('@temporalio/client'); // adjust this if needed
 
 
-const {saveRetailersFromFirebaseToMysqlWorkflow, ordersYesterdayTransferWorkflow, retailerProductsSyncWorkflow} = require('./Workflow/workflows');
+const {saveRetailersFromFirebaseToMysqlWorkflow, ordersYesterdayTransferWorkflow, retailerProductsSyncWorkflow, ordersNewSyncWorkflow} = require('./Workflow/workflows');
 
 // Import the activity to get workflow state
 const { getWorkflowStateFromSyncStatus } = require('./Workflow/Activities/retailer_products_activity');
@@ -43,6 +43,30 @@ async function ordersSync() {
       taskQueue: 'superzop-sync-queue',
       workflowId: `orders-transfer-${Date.now()}`,
       args: ['OrdersYest'],
+    });
+
+    console.log('✅ Workflow started with ID:', handle.workflowId);
+    return handle;
+
+  } catch (error) {
+    console.error('❌ Workflow failed to start:', error);
+    throw error;
+  } finally {
+    await connection.close();
+  }
+}
+
+async function ordersNewSync() {
+  const connection = await Connection.connect();
+  const client = new Client({ connection });
+
+  try {
+    console.log('🚀 Starting Orders New Sync Workflow...');
+
+    const handle = await client.workflow.start('ordersNewSyncWorkflow', {
+      taskQueue: 'superzop-sync-queue',
+      workflowId: `orders-new-sync-${Date.now()}`,
+      args: ['Orders_News'],
     });
 
     console.log('✅ Workflow started with ID:', handle.workflowId);
@@ -156,4 +180,4 @@ async function resumeRetailerProductsSync(workflowId, checkpoint = null) {
   }
 }
 
-module.exports = { retailerSync, ordersSync, retailerProductsSync, resumeRetailerProductsSync };
+module.exports = { retailerSync, ordersSync, ordersNewSync, retailerProductsSync, resumeRetailerProductsSync };

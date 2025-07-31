@@ -15,6 +15,14 @@ const {
   insertOrdersToMySQL,
   completeSyncStatus,
   
+  // Orders New activities
+  saveOrdersNewToMysql,
+  deleteExistingOrders,
+  fetchOrdersFromFirebase,
+  processOrderData,
+  insertOrdersNewToMySQL,
+  updateFinalSyncStatus,
+  
   // Retailer Products activities
   updateRetailerProductsSyncStatus,
   fetchRetailerProductsFromFirebase,
@@ -27,11 +35,11 @@ const {
   
   // updateSubArea1FromRetailerSubAreaTable
 } = proxyActivities({
-  startToCloseTimeout: '30 minutes',
-  heartbeatTimeout: '1 minute',
+  startToCloseTimeout: '60 minutes',
+  heartbeatTimeout: '5 minutes',
   retry: {
-    initialInterval: '1 second',
-    maximumInterval: '30 seconds',
+    initialInterval: '5 seconds',
+    maximumInterval: '2 minutes',
     maximumAttempts: 3,
   },
 });
@@ -392,8 +400,179 @@ const syncStatusUniqueKey = `Retailer_Products_${workflowId}_${completeDateNow}`
   }
 }
 
+// New Orders Sync Workflow - using granular steps for better monitoring
+async function ordersNewSyncWorkflow(ordersPath = 'Orders_News') {
+  const dateNow = new Date();
+  const [monthNow, dayNow, yearNow] = [dateNow.getMonth() + 1, dateNow.getDate(), dateNow.getFullYear()];
+  const [hourNow, minutesNow, secondsNow] = [dateNow.getHours(), dateNow.getMinutes(), dateNow.getSeconds()];
+  const completeDateNow = `${yearNow}-${monthNow}-${dayNow}_${hourNow}:${minutesNow}:${secondsNow}`;
+  const syncStatusUniqueKey = `Orders_New_${completeDateNow}`;
+
+  let orders = [];
+  let processedOrders = [];
+  let deleteResult = null;
+  let insertResult = null;
+
+  try {
+    log.info('🚀 Starting Orders New Sync Workflow');
+    log.info(`📅 Sync Status Key: ${syncStatusUniqueKey}`);
+    log.info(`📂 Firebase Path: ${ordersPath}`);
+
+    // Step 1: Initialize sync status
+    log.info('📊 Step 1: Initializing sync status...');
+    const syncStatusObj = {
+      table_name: "Orders_New",
+      status: "Initializing/Temporal Sync",
+      unique_key: syncStatusUniqueKey
+    };
+    await updateSyncStatus(syncStatusObj);
+    log.info('✅ Step 1 completed: Sync status initialized');
+
+    // Step 2: Update sync status to Running
+    log.info('🔄 Step 2: Updating sync status to Running...');
+    const runningStatusObj = {
+      table_name: "Orders_New",
+      status: "Running/Temporal Sync",
+      unique_key: syncStatusUniqueKey
+    };
+    await updateSyncStatus(runningStatusObj);
+    log.info('✅ Step 2 completed: Sync status set to Running');
+
+    // Step 3: Validate Firebase path
+    log.info('🔍 Step 3: Validating Firebase path...');
+    if (!ordersPath || typeof ordersPath !== 'string') {
+      throw new Error(`Invalid Firebase path: ${ordersPath}`);
+    }
+    log.info(`✅ Step 3 completed: Firebase path validated - ${ordersPath}`);
+
+    // Step 4: Delete existing orders from database
+    log.info('🗑️ Step 4: Deleting existing orders from database...');
+    deleteResult = await deleteExistingOrders();
+    log.info(`✅ Step 4 completed: Successfully deleted ${deleteResult.affectedRows} existing orders`);
+
+    // Step 5: Fetch orders from Firebase
+    log.info('🔥 Step 5: Fetching orders from Firebase...');
+    orders = await fetchOrdersFromFirebase(ordersPath);
+    log.info(`✅ Step 5 completed: Fetched ${orders.length} orders from Firebase`);
+
+    // Step 6: Validate fetched data
+    log.info('✅ Step 6: Validating fetched data...');
+    if (!Array.isArray(orders)) {
+      throw new Error('Fetched orders is not an array');
+    }
+    log.info(`✅ Step 6 completed: Data validation passed - ${orders.length} orders`);
+
+    // Step 7: Process order data
+    log.info('⚙️ Step 7: Processing order data...');
+    processedOrders = await processOrderData(orders);
+    log.info(`✅ Step 7 completed: Processed ${processedOrders.length} orders`);
+
+    // Step 8: Validate processed data
+    log.info('✅ Step 8: Validating processed data...');
+    if (!Array.isArray(processedOrders)) {
+      throw new Error('Processed orders is not an array');
+    }
+    if (processedOrders.length !== orders.length) {
+      log.warn(`⚠️ Warning: Processed orders count (${processedOrders.length}) differs from fetched count (${orders.length})`);
+    }
+    log.info(`✅ Step 8 completed: Processed data validation passed`);
+
+    // Step 9: Prepare for database insertion
+    log.info('📋 Step 9: Preparing for database insertion...');
+    if (processedOrders.length === 0) {
+      log.info('ℹ️ No orders to insert, skipping database operations');
+    } else {
+      log.info(`📊 Preparing to insert ${processedOrders.length} orders`);
+    }
+    log.info('✅ Step 9 completed: Database insertion prepared');
+
+         // Step 10: Insert orders to MySQL
+     log.info('💾 Step 10: Inserting orders to MySQL...');
+     if (processedOrders.length > 0) {
+       insertResult = await insertOrdersNewToMySQL(processedOrders, syncStatusUniqueKey);
+       log.info(`✅ Step 10 completed: Successfully processed ${insertResult.totalProcessed} orders in ${insertResult.chunksProcessed} chunks`);
+     } else {
+       insertResult = { totalProcessed: 0, chunksProcessed: 0 };
+       log.info('✅ Step 10 completed: No orders to insert');
+     }
+
+    // Step 11: Validate insertion results
+    log.info('✅ Step 11: Validating insertion results...');
+    if (processedOrders.length > 0 && (!insertResult || insertResult.totalProcessed !== processedOrders.length)) {
+      log.warn(`⚠️ Warning: Insertion count (${insertResult?.totalProcessed || 0}) differs from processed count (${processedOrders.length})`);
+    }
+    log.info('✅ Step 11 completed: Insertion results validated');
+
+    // Step 12: Update final sync status to Completed
+    log.info('🏁 Step 12: Updating final sync status to Completed...');
+    await updateFinalSyncStatus(syncStatusUniqueKey, "Completed/Temporal Sync");
+    log.info('✅ Step 12 completed: Final sync status updated');
+
+    // Step 13: Generate final report
+    log.info('📊 Step 13: Generating final report...');
+    const finalReport = {
+      success: true,
+      totalOrders: processedOrders.length,
+      deletedOrders: deleteResult.affectedRows,
+      insertedOrders: insertResult.totalProcessed,
+      chunksProcessed: insertResult.chunksProcessed,
+      syncStatusKey: syncStatusUniqueKey,
+      statusMessage: "Orders New sync completed successfully",
+      timestamp: new Date().toISOString(),
+      workflowDuration: Date.now() - dateNow.getTime()
+    };
+    log.info('✅ Step 13 completed: Final report generated');
+
+    log.info('🎉 Orders new sync workflow completed successfully!');
+    log.info(`📈 Summary: ${finalReport.totalOrders} orders processed, ${finalReport.insertedOrders} inserted`);
+    
+    return finalReport;
+
+  } catch (error) {
+    log.error('❌ Orders new sync workflow failed', { error });
+    
+    // Update sync status to Failed with detailed error information
+    try {
+      log.info('🔄 Updating sync status to Failed...');
+      const failedStatusObj = {
+        table_name: "Orders_New",
+        status: "Failed/Temporal Sync",
+        unique_key: syncStatusUniqueKey,
+        error_message: error.message,
+        error_details: {
+          ordersFetched: orders.length,
+          ordersProcessed: processedOrders.length,
+          ordersDeleted: deleteResult?.affectedRows || 0,
+          ordersInserted: insertResult?.totalProcessed || 0,
+          timestamp: new Date().toISOString()
+        }
+      };
+      await updateFinalSyncStatus(syncStatusUniqueKey, "Failed/Temporal Sync");
+      log.info('✅ Sync status updated to Failed');
+    } catch (statusError) {
+      log.error('❌ Failed to update sync status on error', { statusError });
+    }
+
+    // Throw detailed error for workflow failure
+    const detailedError = {
+      message: `Orders sync failed: ${error.message}`,
+      details: {
+        step: 'Unknown',
+        ordersFetched: orders.length,
+        ordersProcessed: processedOrders.length,
+        ordersDeleted: deleteResult?.affectedRows || 0,
+        ordersInserted: insertResult?.totalProcessed || 0,
+        originalError: error.message
+      }
+    };
+
+    throw new Error(JSON.stringify(detailedError));
+  }
+}
+
 module.exports = { 
   saveRetailersFromFirebaseToMysqlWorkflow,
   ordersYesterdayTransferWorkflow,
-  retailerProductsSyncWorkflow
+  retailerProductsSyncWorkflow,
+  ordersNewSyncWorkflow
 };

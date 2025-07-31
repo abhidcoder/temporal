@@ -57,6 +57,34 @@ async function testOrdersSync() {
   }
 }
 
+async function testOrdersNewSync() {
+  const connection = await Connection.connect();
+  const client = new Client({ connection });
+
+  try {
+    console.log('🚀 Starting Orders New Sync Workflow...');
+    
+    const handle = await client.workflow.start('ordersNewSyncWorkflow', {
+      taskQueue: 'superzop-sync-queue',
+      workflowId: `orders-new-sync-${Date.now()}`,
+      args: ['Orders_News'], // Firebase path
+    });
+
+    console.log('✅ Workflow started with ID:', handle.workflowId);
+    console.log('⏳ Waiting for result...');
+    
+    const result = await handle.result();
+    console.log('🎉 Workflow completed successfully!');
+    console.log('📊 Result:', JSON.stringify(result, null, 2));
+    
+  } catch (error) {
+    console.error('❌ Workflow failed:', error.message);
+    console.error('Stack:', error.stack);
+  } finally {
+    await connection.close();
+  }
+}
+
 // Run tests
 async function runTests() {
   console.log('='.repeat(50));
@@ -72,6 +100,11 @@ async function runTests() {
   if (testChoice === 'orders' || !testChoice) {
     console.log('\n' + '-'.repeat(30));
     await testOrdersSync();
+  }
+  
+  if (testChoice === 'orders-new' || !testChoice) {
+    console.log('\n' + '-'.repeat(30));
+    await testOrdersNewSync();
   }
   
   console.log('\n✨ Tests completed!');
