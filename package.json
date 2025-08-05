@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "src/server.js",
   "scripts": {
-    "worker": "node src/worker.js",
+    "worker": "node src/Workflow/worker.js",
     "server": "node src/server.js",
     "dev": "concurrently \"npm run worker\" \"npm run server\""
   },

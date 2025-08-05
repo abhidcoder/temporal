@@ -170,7 +170,12 @@ app.post('/table/resume', async (req, res) => {
 // Start server
 async function startServer() {
   try {
-    await initTemporal();
+    // Try to connect to Temporal, but don't fail if it's not available
+    try {
+      await initTemporal();
+    } catch (temporalError) {
+      console.log('⚠️  Temporal not available yet, will retry later:', temporalError.message);
+    }
     
     app.listen(PORT, () => {
       console.log(`🌐 Express server running on http://localhost:${PORT}`);
