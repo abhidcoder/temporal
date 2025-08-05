@@ -408,17 +408,47 @@ const syncStatusUniqueKey = `Retailer_Products_${workflowId}_${completeDateNow}`
 }
 
 // New Orders Sync Workflow - using granular steps for better monitoring
-async function ordersNewSyncWorkflow(ordersPath = 'Orders_News') {
+async function ordersNewSyncWorkflow(ordersPath = 'Orders_News', resumeInfo = null) {
   const dateNow = new Date();
   const [monthNow, dayNow, yearNow] = [dateNow.getMonth() + 1, dateNow.getDate(), dateNow.getFullYear()];
   const [hourNow, minutesNow, secondsNow] = [dateNow.getHours(), dateNow.getMinutes(), dateNow.getSeconds()];
   const completeDateNow = `${yearNow}-${monthNow}-${dayNow}_${hourNow}:${minutesNow}:${secondsNow}`;
   const syncStatusUniqueKey = `Orders_New_${completeDateNow}`;
 
-  let orders = [];
-  let processedOrders = [];
-  let deleteResult = null;
-  let insertResult = null;
+  // Check if this is a resume operation
+  const isResume = resumeInfo ? true : false;
+  const originalWorkflowId = resumeInfo?.originalWorkflowId || null;
+  const resumeCheckpoint = resumeInfo?.checkpoint || null;
+  const savedWorkflowState = resumeInfo?.workflowState || null;
+
+  if (isResume) {
+    log.info(`🔄 Resuming workflow from checkpoint: ${resumeCheckpoint}`);
+    log.info(`📋 Original workflow ID: ${originalWorkflowId}`);
+  }
+
+  // Initialize workflow state - restore from saved state if resuming
+  let workflowState = savedWorkflowState || {
+    step1Completed: false,
+    step2Completed: false,
+    step3Completed: false,
+    step4Completed: false,
+    step5Completed: false,
+    step6Completed: false,
+    step7Completed: false,
+    step8Completed: false,
+    step9Completed: false,
+    step10Completed: false,
+    orders: [],
+    processedOrders: [],
+    deleteResult: null,
+    insertResult: null,
+    errors: [],
+    lastCheckpoint: null
+  };
+
+  if (isResume && savedWorkflowState) {
+    log.info(`🔄 Restored workflow state: ${JSON.stringify(workflowState)}`);
+  }
 
   try {
     log.info('🚀 Starting Orders New Sync Workflow');
@@ -426,118 +456,249 @@ async function ordersNewSyncWorkflow(ordersPath = 'Orders_News') {
     log.info(`📂 Firebase Path: ${ordersPath}`);
 
     // Step 1: Initialize sync status
-    log.info('📊 Step 1: Initializing sync status...');
-    const syncStatusObj = {
-      table_name: "Orders_New",
-      status: "Initializing/Temporal Sync",
-      unique_key: syncStatusUniqueKey
-    };
-    await updateSyncStatus(syncStatusObj);
-    log.info('✅ Step 1 completed: Sync status initialized');
+    if (!workflowState.step1Completed) {
+      if (isResume) {
+        log.info('🔄 Resuming: Skipping Step 1 (already completed in original workflow)');
+        workflowState.step1Completed = true;
+        workflowState.lastCheckpoint = 'status_initialized';
+      } else {
+        log.info('📊 Step 1: Initializing sync status...');
+        const syncStatusObj = {
+          table_name: "Orders_New",
+          status: "Initializing/Temporal Sync",
+          unique_key: syncStatusUniqueKey
+        };
+        await updateSyncStatus(syncStatusObj);
+        workflowState.step1Completed = true;
+        workflowState.lastCheckpoint = 'status_initialized';
+        log.info('✅ Step 1 completed: Sync status initialized');
+      }
+    }
 
     // Step 2: Update sync status to Running
-    log.info('🔄 Step 2: Updating sync status to Running...');
-    const runningStatusObj = {
-      table_name: "Orders_New",
-      status: "Running/Temporal Sync",
-      unique_key: syncStatusUniqueKey
-    };
-    await updateSyncStatus(runningStatusObj);
-    log.info('✅ Step 2 completed: Sync status set to Running');
+    if (!workflowState.step2Completed) {
+      if (isResume) {
+        log.info('🔄 Resuming: Skipping Step 2 (already completed in original workflow)');
+        workflowState.step2Completed = true;
+        workflowState.lastCheckpoint = 'status_running';
+      } else {
+        log.info('🔄 Step 2: Updating sync status to Running...');
+        const runningStatusObj = {
+          table_name: "Orders_New",
+          status: "Running/Temporal Sync",
+          unique_key: syncStatusUniqueKey
+        };
+        await updateSyncStatus(runningStatusObj);
+        workflowState.step2Completed = true;
+        workflowState.lastCheckpoint = 'status_running';
+        log.info('✅ Step 2 completed: Sync status set to Running');
+      }
+    }
 
     // Step 3: Validate Firebase path
-    log.info('🔍 Step 3: Validating Firebase path...');
-    if (!ordersPath || typeof ordersPath !== 'string') {
-      throw new Error(`Invalid Firebase path: ${ordersPath}`);
+    if (!workflowState.step3Completed) {
+      log.info('🔍 Step 3: Validating Firebase path...');
+      if (!ordersPath || typeof ordersPath !== 'string') {
+        throw new Error(`Invalid Firebase path: ${ordersPath}`);
+      }
+      workflowState.step3Completed = true;
+      workflowState.lastCheckpoint = 'path_validated';
+      log.info(`✅ Step 3 completed: Firebase path validated - ${ordersPath}`);
     }
-    log.info(`✅ Step 3 completed: Firebase path validated - ${ordersPath}`);
 
     // Step 4: Delete existing orders from database
-    log.info('🗑️ Step 4: Deleting existing orders from database...');
-    deleteResult = await deleteExistingOrders();
-    log.info(`✅ Step 4 completed: Successfully deleted ${deleteResult.affectedRows} existing orders`);
+    if (!workflowState.step4Completed) {
+      if (isResume && resumeCheckpoint === 'delete_failed') {
+        log.info('🔄 Resuming: Retrying Step 4 (delete) from previous failure');
+      } else if (isResume && resumeCheckpoint === 'delete_completed') {
+        log.info('🔄 Resuming: Skipping Step 4 (delete already completed)');
+        workflowState.step4Completed = true;
+        workflowState.lastCheckpoint = 'delete_completed';
+      } else {
+        log.info('🗑️ Step 4: Deleting existing orders from database...');
+      }
+      
+      // Only delete if we don't have the result or if we're retrying
+      if (!isResume || resumeCheckpoint === 'delete_failed' || !workflowState.deleteResult) {
+        workflowState.deleteResult = await deleteExistingOrders();
+        log.info(`✅ Step 4 completed: Successfully deleted ${workflowState.deleteResult.affectedRows} existing orders`);
+        workflowState.step4Completed = true;
+        workflowState.lastCheckpoint = 'delete_completed';
+      } else {
+        log.info('🔄 Using cached delete result from previous execution');
+      }
+    }
 
     // Step 5: Fetch orders from Firebase
-    log.info('🔥 Step 5: Fetching orders from Firebase...');
-    orders = await fetchOrdersFromFirebase(ordersPath);
-    log.info(`✅ Step 5 completed: Fetched ${orders.length} orders from Firebase`);
+    if (!workflowState.step5Completed) {
+      if (isResume && resumeCheckpoint === 'fetch_failed') {
+        log.info('🔄 Resuming: Retrying Step 5 (fetch) from previous failure');
+      } else if (isResume && resumeCheckpoint === 'fetch_completed') {
+        log.info('🔄 Resuming: Skipping Step 5 (fetch already completed)');
+        workflowState.step5Completed = true;
+        workflowState.lastCheckpoint = 'fetch_completed';
+      } else {
+        log.info('🔥 Step 5: Fetching orders from Firebase...');
+      }
+      
+      // Only fetch if we don't have the result or if we're retrying
+      if (!isResume || resumeCheckpoint === 'fetch_failed' || !workflowState.orders.length) {
+        workflowState.orders = await fetchOrdersFromFirebase(ordersPath);
+        log.info(`✅ Step 5 completed: Fetched ${workflowState.orders.length} orders from Firebase`);
+        workflowState.step5Completed = true;
+        workflowState.lastCheckpoint = 'fetch_completed';
+      } else {
+        log.info('🔄 Using cached orders from previous execution');
+      }
+    }
 
     // Step 6: Validate fetched data
-    log.info('✅ Step 6: Validating fetched data...');
-    if (!Array.isArray(orders)) {
-      throw new Error('Fetched orders is not an array');
+    if (!workflowState.step6Completed) {
+      log.info('✅ Step 6: Validating fetched data...');
+      if (!Array.isArray(workflowState.orders)) {
+        throw new Error('Fetched orders is not an array');
+      }
+      workflowState.step6Completed = true;
+      workflowState.lastCheckpoint = 'data_validated';
+      log.info(`✅ Step 6 completed: Data validation passed - ${workflowState.orders.length} orders`);
     }
-    log.info(`✅ Step 6 completed: Data validation passed - ${orders.length} orders`);
 
     // Step 7: Process order data
-    log.info('⚙️ Step 7: Processing order data...');
-    processedOrders = await processOrderData(orders);
-    log.info(`✅ Step 7 completed: Processed ${processedOrders.length} orders`);
+    if (!workflowState.step7Completed) {
+      if (isResume && resumeCheckpoint === 'process_failed') {
+        log.info('🔄 Resuming: Retrying Step 7 (process) from previous failure');
+      } else if (isResume && resumeCheckpoint === 'process_completed') {
+        log.info('🔄 Resuming: Skipping Step 7 (process already completed)');
+        workflowState.step7Completed = true;
+        workflowState.lastCheckpoint = 'process_completed';
+      } else {
+        log.info('⚙️ Step 7: Processing order data...');
+      }
+      
+      // Only process if we don't have the result or if we're retrying
+      if (!isResume || resumeCheckpoint === 'process_failed' || !workflowState.processedOrders.length) {
+        workflowState.processedOrders = await processOrderData(workflowState.orders);
+        log.info(`✅ Step 7 completed: Processed ${workflowState.processedOrders.length} orders`);
+        workflowState.step7Completed = true;
+        workflowState.lastCheckpoint = 'process_completed';
+      } else {
+        log.info('🔄 Using cached processed orders from previous execution');
+      }
+    }
 
     // Step 8: Validate processed data
-    log.info('✅ Step 8: Validating processed data...');
-    if (!Array.isArray(processedOrders)) {
-      throw new Error('Processed orders is not an array');
+    if (!workflowState.step8Completed) {
+      log.info('✅ Step 8: Validating processed data...');
+      if (!Array.isArray(workflowState.processedOrders)) {
+        throw new Error('Processed orders is not an array');
+      }
+      if (workflowState.processedOrders.length !== workflowState.orders.length) {
+        log.warn(`⚠️ Warning: Processed orders count (${workflowState.processedOrders.length}) differs from fetched count (${workflowState.orders.length})`);
+      }
+      workflowState.step8Completed = true;
+      workflowState.lastCheckpoint = 'processed_validated';
+      log.info(`✅ Step 8 completed: Processed data validation passed`);
     }
-    if (processedOrders.length !== orders.length) {
-      log.warn(`⚠️ Warning: Processed orders count (${processedOrders.length}) differs from fetched count (${orders.length})`);
-    }
-    log.info(`✅ Step 8 completed: Processed data validation passed`);
 
     // Step 9: Prepare for database insertion
-    log.info('📋 Step 9: Preparing for database insertion...');
-    if (processedOrders.length === 0) {
-      log.info('ℹ️ No orders to insert, skipping database operations');
-    } else {
-      log.info(`📊 Preparing to insert ${processedOrders.length} orders`);
+    if (!workflowState.step9Completed) {
+      log.info('📋 Step 9: Preparing for database insertion...');
+      if (workflowState.processedOrders.length === 0) {
+        log.info('ℹ️ No orders to insert, skipping database operations');
+      } else {
+        log.info(`📊 Preparing to insert ${workflowState.processedOrders.length} orders`);
+      }
+      workflowState.step9Completed = true;
+      workflowState.lastCheckpoint = 'insertion_prepared';
+      log.info('✅ Step 9 completed: Database insertion prepared');
     }
-    log.info('✅ Step 9 completed: Database insertion prepared');
 
-         // Step 10: Insert orders to MySQL
-     log.info('💾 Step 10: Inserting orders to MySQL...');
-     if (processedOrders.length > 0) {
-       insertResult = await insertOrdersNewToMySQL(processedOrders, syncStatusUniqueKey);
-       log.info(`✅ Step 10 completed: Successfully processed ${insertResult.totalProcessed} orders in ${insertResult.chunksProcessed} chunks`);
-     } else {
-       insertResult = { totalProcessed: 0, chunksProcessed: 0 };
-       log.info('✅ Step 10 completed: No orders to insert');
-     }
+    // Step 10: Insert orders to MySQL
+    if (!workflowState.step10Completed) {
+      if (isResume && resumeCheckpoint === 'insert_failed') {
+        log.info('🔄 Resuming: Retrying Step 10 (insert) from previous failure');
+      } else if (isResume && resumeCheckpoint === 'insert_completed') {
+        log.info('🔄 Resuming: Skipping Step 10 (insert already completed)');
+        workflowState.step10Completed = true;
+        workflowState.lastCheckpoint = 'insert_completed';
+      } else {
+        log.info('💾 Step 10: Inserting orders to MySQL...');
+      }
+      
+      // Only insert if we don't have the result or if we're retrying
+      if (!isResume || resumeCheckpoint === 'insert_failed' || !workflowState.insertResult) {
+        if (workflowState.processedOrders.length > 0) {
+          workflowState.insertResult = await insertOrdersNewToMySQL(workflowState.processedOrders, syncStatusUniqueKey);
+          log.info(`✅ Step 10 completed: Successfully processed ${workflowState.insertResult.totalProcessed} orders in ${workflowState.insertResult.chunksProcessed} chunks`);
+        } else {
+          workflowState.insertResult = { totalProcessed: 0, chunksProcessed: 0 };
+          log.info('✅ Step 10 completed: No orders to insert');
+        }
+        workflowState.step10Completed = true;
+        workflowState.lastCheckpoint = 'insert_completed';
+      } else {
+        log.info('🔄 Using cached insert result from previous execution');
+      }
+    }
 
     // Step 11: Validate insertion results
-    log.info('✅ Step 11: Validating insertion results...');
-    if (processedOrders.length > 0 && (!insertResult || insertResult.totalProcessed !== processedOrders.length)) {
-      log.warn(`⚠️ Warning: Insertion count (${insertResult?.totalProcessed || 0}) differs from processed count (${processedOrders.length})`);
+    if (!workflowState.step11Completed) {
+      log.info('✅ Step 11: Validating insertion results...');
+      if (workflowState.processedOrders.length > 0 && (!workflowState.insertResult || workflowState.insertResult.totalProcessed !== workflowState.processedOrders.length)) {
+        log.warn(`⚠️ Warning: Insertion count (${workflowState.insertResult?.totalProcessed || 0}) differs from processed count (${workflowState.processedOrders.length})`);
+      }
+      workflowState.step11Completed = true;
+      workflowState.lastCheckpoint = 'insertion_validated';
+      log.info('✅ Step 11 completed: Insertion results validated');
     }
-    log.info('✅ Step 11 completed: Insertion results validated');
 
     // Step 12: Update final sync status to Completed
-    log.info('🏁 Step 12: Updating final sync status to Completed...');
-    await updateFinalSyncStatus(syncStatusUniqueKey, "Completed/Temporal Sync");
-    log.info('✅ Step 12 completed: Final sync status updated');
+    if (!workflowState.step12Completed) {
+      log.info('🏁 Step 12: Updating final sync status to Completed...');
+      await updateFinalSyncStatus(syncStatusUniqueKey, "Completed/Temporal Sync");
+      workflowState.step12Completed = true;
+      workflowState.lastCheckpoint = 'sync_completed';
+      log.info('✅ Step 12 completed: Final sync status updated');
+    }
 
     // Step 13: Generate final report
-    log.info('📊 Step 13: Generating final report...');
-    const finalReport = {
-      success: true,
-      totalOrders: processedOrders.length,
-      deletedOrders: deleteResult.affectedRows,
-      insertedOrders: insertResult.totalProcessed,
-      chunksProcessed: insertResult.chunksProcessed,
-      syncStatusKey: syncStatusUniqueKey,
-      statusMessage: "Orders New sync completed successfully",
-      timestamp: new Date().toISOString(),
-      workflowDuration: Date.now() - dateNow.getTime()
-    };
-    log.info('✅ Step 13 completed: Final report generated');
+    if (!workflowState.step13Completed) {
+      log.info('📊 Step 13: Generating final report...');
+      const finalReport = {
+        success: true,
+        totalOrders: workflowState.processedOrders.length,
+        deletedOrders: workflowState.deleteResult.affectedRows,
+        insertedOrders: workflowState.insertResult.totalProcessed,
+        chunksProcessed: workflowState.insertResult.chunksProcessed,
+        syncStatusKey: syncStatusUniqueKey,
+        statusMessage: "Orders New sync completed successfully",
+        timestamp: new Date().toISOString(),
+        workflowDuration: Date.now() - dateNow.getTime(),
+        isResumed: isResume,
+        originalWorkflowId: originalWorkflowId,
+        resumeCheckpoint: resumeCheckpoint
+      };
+      workflowState.step13Completed = true;
+      workflowState.lastCheckpoint = 'workflow_completed';
+      log.info('✅ Step 13 completed: Final report generated');
 
-    log.info('🎉 Orders new sync workflow completed successfully!');
-    log.info(`📈 Summary: ${finalReport.totalOrders} orders processed, ${finalReport.insertedOrders} inserted`);
-    
-    return finalReport;
+      log.info('🎉 Orders new sync workflow completed successfully!');
+      log.info(`📈 Summary: ${finalReport.totalOrders} orders processed, ${finalReport.insertedOrders} inserted`);
+      
+      return finalReport;
+    }
 
   } catch (error) {
     log.error('❌ Orders new sync workflow failed', { error });
     
+    // Save workflow state for potential resume
+    const failedWorkflowState = {
+      ...workflowState,
+      lastCheckpoint: workflowState.lastCheckpoint,
+      error: error.message,
+      failedAt: new Date().toISOString()
+    };
+
     // Update sync status to Failed with detailed error information
     try {
       log.info('🔄 Updating sync status to Failed...');
@@ -547,11 +708,13 @@ async function ordersNewSyncWorkflow(ordersPath = 'Orders_News') {
         unique_key: syncStatusUniqueKey,
         error_message: error.message,
         error_details: {
-          ordersFetched: orders.length,
-          ordersProcessed: processedOrders.length,
-          ordersDeleted: deleteResult?.affectedRows || 0,
-          ordersInserted: insertResult?.totalProcessed || 0,
-          timestamp: new Date().toISOString()
+          step: workflowState.lastCheckpoint || 'Unknown',
+          ordersFetched: workflowState.orders.length,
+          ordersProcessed: workflowState.processedOrders.length,
+          ordersDeleted: workflowState.deleteResult?.affectedRows || 0,
+          ordersInserted: workflowState.insertResult?.totalProcessed || 0,
+          timestamp: new Date().toISOString(),
+          workflowState: JSON.stringify(failedWorkflowState)
         }
       };
       await updateFinalSyncStatus(syncStatusUniqueKey, "Failed/Temporal Sync");
@@ -564,12 +727,18 @@ async function ordersNewSyncWorkflow(ordersPath = 'Orders_News') {
     const detailedError = {
       message: `Orders sync failed: ${error.message}`,
       details: {
-        step: 'Unknown',
-        ordersFetched: orders.length,
-        ordersProcessed: processedOrders.length,
-        ordersDeleted: deleteResult?.affectedRows || 0,
-        ordersInserted: insertResult?.totalProcessed || 0,
-        originalError: error.message
+        step: workflowState.lastCheckpoint || 'Unknown',
+        ordersFetched: workflowState.orders.length,
+        ordersProcessed: workflowState.processedOrders.length,
+        ordersDeleted: workflowState.deleteResult?.affectedRows || 0,
+        ordersInserted: workflowState.insertResult?.totalProcessed || 0,
+        originalError: error.message,
+        workflowState: failedWorkflowState,
+        resumeInfo: {
+          originalWorkflowId: syncStatusUniqueKey,
+          checkpoint: workflowState.lastCheckpoint,
+          workflowState: failedWorkflowState
+        }
       }
     };
 

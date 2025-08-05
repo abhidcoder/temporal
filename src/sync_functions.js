@@ -56,51 +56,55 @@ async function ordersSync() {
   }
 }
 
-async function ordersNewSync() {
-  const connection = await Connection.connect();
-  const client = new Client({ connection });
-
+async function ordersNewSync(resumeInfo = null) {
+  const client = new Client();
+  
   try {
-    console.log('🚀 Starting Orders New Sync Workflow...');
-
-    const handle = await client.workflow.start('ordersNewSyncWorkflow', {
+    const workflowId = resumeInfo ? 
+      `resume-orders-new-${Date.now()}` : 
+      `orders-new-sync-${Date.now()}`;
+    
+    console.log(`🚀 Starting Orders New Sync Workflow${resumeInfo ? ' (Resume)' : ''}`);
+    console.log(`📋 Workflow ID: ${workflowId}`);
+    
+    const workflowHandle = await client.workflow.start(ordersNewSyncWorkflow, {
       taskQueue: 'superzop-sync-queue',
-      workflowId: `orders-new-sync-${Date.now()}`,
-      args: ['Orders_News'],
+      workflowId: workflowId,
+      args: ['Orders_News', resumeInfo]
     });
-
-    console.log('✅ Workflow started with ID:', handle.workflowId);
-    return handle;
-
+    
+    console.log(`✅ Orders New Sync Workflow started with ID: ${workflowHandle.workflowId}`);
+    return workflowHandle;
+    
   } catch (error) {
-    console.error('❌ Workflow failed to start:', error);
+    console.error('❌ Failed to start Orders New Sync Workflow:', error);
     throw error;
-  } finally {
-    await connection.close();
   }
 }
 
-async function salesmanDetailsSync() {
-  const connection = await Connection.connect();
-  const client = new Client({ connection });
-
+async function salesmanDetailsSync(resumeInfo = null) {
+  const client = new Client();
+  
   try {
-    console.log('🚀 Starting Salesman Details Sync Workflow...');
-
-    const handle = await client.workflow.start('salesmanDetailsSyncWorkflow', {
+    const workflowId = resumeInfo ? 
+      `resume-salesman-details-${Date.now()}` : 
+      `salesman-details-sync-${Date.now()}`;
+    
+    console.log(`🚀 Starting Salesman Details Sync Workflow${resumeInfo ? ' (Resume)' : ''}`);
+    console.log(`📋 Workflow ID: ${workflowId}`);
+    
+    const workflowHandle = await client.workflow.start(salesmanDetailsSyncWorkflow, {
       taskQueue: 'superzop-sync-queue',
-      workflowId: `salesman-details-sync-${Date.now()}`,
-      args: ['Salesman_Details'],
+      workflowId: workflowId,
+      args: ['Salesman_Details', resumeInfo]
     });
-
-    console.log('✅ Workflow started with ID:', handle.workflowId);
-    return handle;
-
+    
+    console.log(`✅ Salesman Details Sync Workflow started with ID: ${workflowHandle.workflowId}`);
+    return workflowHandle;
+    
   } catch (error) {
-    console.error('❌ Workflow failed to start:', error);
+    console.error('❌ Failed to start Salesman Details Sync Workflow:', error);
     throw error;
-  } finally {
-    await connection.close();
   }
 }
 
@@ -204,4 +208,46 @@ async function resumeRetailerProductsSync(workflowId, checkpoint = null) {
   }
 }
 
-module.exports = { retailerSync, ordersSync, ordersNewSync, salesmanDetailsSync, retailerProductsSync, resumeRetailerProductsSync };
+// Resume workflow from a specific checkpoint
+async function resumeWorkflow(workflowType, resumeInfo, options = {}) {
+  const client = new Client();
+  
+  try {
+    console.log(`🔄 Resuming ${workflowType} workflow from checkpoint: ${resumeInfo.checkpoint}`);
+    console.log(`📋 Original workflow ID: ${resumeInfo.originalWorkflowId}`);
+    
+    let workflowHandle;
+    
+    switch (workflowType) {
+      case 'ordersNewSync':
+        workflowHandle = await client.workflow.start(ordersNewSyncWorkflow, {
+          taskQueue: 'superzop-sync-queue', // Changed from 'sync-queue' to 'superzop-sync-queue'
+          workflowId: `resume-orders-new-${Date.now()}`,
+          args: ['Orders_News', resumeInfo],
+          ...options
+        });
+        break;
+        
+      case 'salesmanDetailsSync':
+        workflowHandle = await client.workflow.start(salesmanDetailsSyncWorkflow, {
+          taskQueue: 'superzop-sync-queue', // Changed from 'sync-queue' to 'superzop-sync-queue'
+          workflowId: `resume-salesman-details-${Date.now()}`,
+          args: ['Salesman_Details', resumeInfo],
+          ...options
+        });
+        break;
+        
+      default:
+        throw new Error(`Unknown workflow type: ${workflowType}`);
+    }
+    
+    console.log(`✅ Resumed workflow started with ID: ${workflowHandle.workflowId}`);
+    return workflowHandle;
+    
+  } catch (error) {
+    console.error(`❌ Failed to resume ${workflowType} workflow:`, error);
+    throw error;
+  }
+}
+
+module.exports = { retailerSync, ordersSync, ordersNewSync, salesmanDetailsSync, retailerProductsSync, resumeRetailerProductsSync, resumeWorkflow };

@@ -35,6 +35,18 @@ app.get('/', (req, res) => {
   });
 });
 
+// Health check endpoint for monitoring
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    service: 'temporal-sync-server',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    version: process.env.npm_package_version || '1.0.0',
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
 
 
 // Table sync endpoint - handles both retailer and orders workflows
@@ -100,48 +112,56 @@ app.post('/table/sync', async (req, res) => {
   }
 });
 
-// Resume workflow endpoint
+// Resume workflow from checkpoint endpoint
 app.post('/table/resume', async (req, res) => {
-  let { workflowId, tableKey, checkpoint } = req.body;
-
-  if (!workflowId || !tableKey) {
-    return res.status(400).json({"error": "workflowId and tableKey are required"});
-  }
-
   try {
-    let handle;
-    let workflowType;
+    const { tableKey, resumeInfo } = req.body;
     
-    if(tableKey == "retailer_products") {
-      handle = await resumeRetailerProductsSync(workflowId, checkpoint);
-      workflowType = 'retailer_products';
-    }
-    else {
+    if (!tableKey || !resumeInfo) {
       return res.status(400).json({
-        "error": "Resume not supported for this tableKey. Supported values: 'retailer_products'"
+        success: false,
+        message: 'Missing required parameters: tableKey and resumeInfo are required'
       });
     }
 
-    res.status(202).json({
+    console.log(`🔄 Resume request received for table: ${tableKey}`);
+    console.log(`📋 Resume info:`, resumeInfo);
+
+    let workflowHandle;
+    
+    switch (tableKey) {
+      case 'orders_new':
+        workflowHandle = await ordersNewSync(resumeInfo);
+        break;
+        
+      case 'salesman_details':
+        workflowHandle = await salesmanDetailsSync(resumeInfo);
+        break;
+        
+      case 'retailer_products':
+        workflowHandle = await resumeRetailerProductsSync(resumeInfo);
+        break;
+        
+      default:
+        return res.status(400).json({
+          success: false,
+          message: `Invalid tableKey: ${tableKey}. Supported values: orders_new, salesman_details, retailer_products`
+        });
+    }
+
+    res.json({
       success: true,
-      message: `${workflowType} workflow resume initiated`,
-      workflowId: handle.workflowId,
-      originalWorkflowId: workflowId,
-      checkpoint: checkpoint,
-      status: 'RESUMING',
-      resumeTime: new Date().toISOString(),
-      workflowUrl: `http://localhost:8233/namespaces/default/workflows/${handle.workflowId}`
+      message: `${tableKey} workflow resumed successfully`,
+      workflowId: workflowHandle.workflowId,
+      resumeInfo: resumeInfo
     });
 
   } catch (error) {
-    console.error('❌ Failed to resume workflow:', error);
-
+    console.error('❌ Resume workflow failed:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to resume workflow',
-      message: error.message,
-      details: error.stack,
-      timestamp: new Date().toISOString()
+      message: `Failed to resume workflow: ${error.message}`,
+      error: error.message
     });
   }
 });

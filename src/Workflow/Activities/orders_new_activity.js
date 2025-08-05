@@ -11,15 +11,15 @@ const BASE_URL = process.env.BASE_URL || 'https://dev-services.superzop.com';
 async function updateSyncStatus(syncStatusObj) {
   const sync_status_url = `${BASE_URL}/api/superzop/admin/sync_status/insertupdatesyncstatus`;
   const options = {
-    url: sync_status_url,
-    body: syncStatusObj,
-    json: true,
+      url: sync_status_url,
+      body: syncStatusObj,
+      json: true,
     headers: { 'Content-Type': 'application/json' }
-  };
+    };
 
-  return new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
     request.post(options, (err, res, body) => {
-      if (err) {
+        if (err) {
         console.error('Sync status update error:', err);
         reject(ApplicationFailure.nonRetryable(err.message));
       } else {
@@ -165,8 +165,8 @@ async function insertOrderChunk(orders, syncStatusUniqueKey, isFirstChunk = fals
     const [results] = await promisePool.execute(finalQuery, params);
     console.log(`Inserted chunk of ${orders.length} orders`);
     return results;
-
-  } catch (error) {
+        
+      } catch (error) {
     console.error('Error inserting order chunk:', error);
     throw error;
   }
@@ -174,23 +174,23 @@ async function insertOrderChunk(orders, syncStatusUniqueKey, isFirstChunk = fals
 
 // Activity: Update final sync status
 async function updateFinalSyncStatus(syncStatusUniqueKey, status) {
-  const syncStatusObj = {
-    unique_key: syncStatusUniqueKey,
-    status: status
-  };
+    const syncStatusObj = {
+      unique_key: syncStatusUniqueKey,
+      status: status
+    };
 
   const sync_status_url = `${BASE_URL}/api/superzop/admin/sync_status/insertupdatesyncstatus`;
   const options = {
-    url: sync_status_url,
-    body: syncStatusObj,
-    json: true,
+      url: sync_status_url,
+      body: syncStatusObj,
+      json: true,
     headers: { 'Content-Type': 'application/json' }
-  };
+    };
 
-  return new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
     request.post(options, (err, res, body) => {
-      if (err) {
-        console.error('Final sync status update failed:', err);
+        if (err) {
+          console.error('Final sync status update failed:', err);
         reject(ApplicationFailure.nonRetryable(err.message));
       } else {
         console.log(`Final sync status updated to ${status}. Status: ${res.statusCode}`);
