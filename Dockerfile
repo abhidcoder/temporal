@@ -1,5 +1,10 @@
 # Multi-stage build for production
-FROM node:18-alpine AS builder
+FROM node:20-bullseye-slim AS builder
+
+# Install ca-certificates (required for TypeScript SDK)
+RUN apt-get update \
+    && apt-get install -y ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -14,14 +19,18 @@ RUN npm ci --only=production && npm cache clean --force
 COPY . .
 
 # Create production stage
-FROM node:18-alpine AS production
+FROM node:20-bullseye-slim AS production
+
+# Install ca-certificates (required for TypeScript SDK)
+RUN apt-get update \
+    && apt-get install -y ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+RUN apt-get update && apt-get install -y dumb-init && rm -rf /var/lib/apt/lists/*
 
 # Create app user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+RUN groupadd -r nodejs && useradd -r -g nodejs nodejs
 
 # Set working directory
 WORKDIR /app

@@ -57,7 +57,10 @@ async function ordersSync() {
 }
 
 async function ordersNewSync(resumeInfo = null) {
-  const client = new Client();
+  const connection = await Connection.connect({
+    address: 'temporal:7233'
+  });
+  const client = new Client({ connection });
   
   try {
     const workflowId = resumeInfo ? 
@@ -67,7 +70,7 @@ async function ordersNewSync(resumeInfo = null) {
     console.log(`🚀 Starting Orders New Sync Workflow${resumeInfo ? ' (Resume)' : ''}`);
     console.log(`📋 Workflow ID: ${workflowId}`);
     
-    const workflowHandle = await client.workflow.start(ordersNewSyncWorkflow, {
+    const workflowHandle = await client.workflow.start('ordersNewSyncWorkflow', {
       taskQueue: 'superzop-sync-queue',
       workflowId: workflowId,
       args: ['Orders_News', resumeInfo]
@@ -79,11 +82,16 @@ async function ordersNewSync(resumeInfo = null) {
   } catch (error) {
     console.error('❌ Failed to start Orders New Sync Workflow:', error);
     throw error;
+  } finally {
+    await connection.close();
   }
 }
 
 async function salesmanDetailsSync(resumeInfo = null) {
-  const client = new Client();
+  const connection = await Connection.connect({
+    address: 'temporal:7233'
+  });
+  const client = new Client({ connection });
   
   try {
     const workflowId = resumeInfo ? 
@@ -93,7 +101,7 @@ async function salesmanDetailsSync(resumeInfo = null) {
     console.log(`🚀 Starting Salesman Details Sync Workflow${resumeInfo ? ' (Resume)' : ''}`);
     console.log(`📋 Workflow ID: ${workflowId}`);
     
-    const workflowHandle = await client.workflow.start(salesmanDetailsSyncWorkflow, {
+    const workflowHandle = await client.workflow.start('salesmanDetailsSyncWorkflow', {
       taskQueue: 'superzop-sync-queue',
       workflowId: workflowId,
       args: ['Salesman_Details', resumeInfo]
@@ -105,6 +113,8 @@ async function salesmanDetailsSync(resumeInfo = null) {
   } catch (error) {
     console.error('❌ Failed to start Salesman Details Sync Workflow:', error);
     throw error;
+  } finally {
+    await connection.close();
   }
 }
 
