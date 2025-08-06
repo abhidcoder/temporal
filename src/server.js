@@ -17,11 +17,20 @@ app.use(express.json());
 let temporalClient;
 
 async function initTemporal() {
-  const connection = await Connection.connect({ 
-    address: process.env.TEMPORAL_ADDRESS || 'localhost:7233' 
-  });
-  temporalClient = new Client({ connection });
-  console.log('✅ Connected to Temporal');
+  try {
+    console.log('🔄 Attempting to connect to Temporal...');
+    const connection = await Connection.connect({ 
+      address: process.env.TEMPORAL_ADDRESS || 'localhost:7233' 
+    });
+    temporalClient = new Client({ connection });
+    console.log('✅ Connected to Temporal');
+  } catch (error) {
+    console.error('❌ Failed to connect to Temporal:', error.message);
+    console.log('💡 Make sure Temporal server is running on', process.env.TEMPORAL_ADDRESS || 'localhost:7233');
+    console.log('💡 For local development, you can start Temporal with:');
+    console.log('   temporal server start-dev');
+    // Don't exit, just log the error and continue
+  }
 }
 
 // Routes
